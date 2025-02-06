@@ -1,5 +1,8 @@
 package com.example.laboratory_work_8
 
+import android.content.Context
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.util.Log
@@ -39,16 +42,28 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.storage.FirebaseStorage
+import java.util.UUID
 
 @SuppressLint("StaticFieldLeak")
 val db = FirebaseFirestore.getInstance()
 
-// Обновляем класс Recipe, добавляя id
 data class Recipe(
     val id: String,
     val name: String,
     val ingredients: String,
-    val instructions: String
+    val instructions: String,
+    val imageUrl: String = "" // Default empty string for recipes without images
 )
 
 class MainActivity : ComponentActivity() {
@@ -57,14 +72,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             Laboratory_Work_8Theme {
-                App()
+                App(this)
             }
         }
     }
 }
 
 @Composable
-fun App() {
+fun App(context: Context = LocalContext.current) {  // Add context parameter
     val navController = rememberNavController()
     var showDialog by remember { mutableStateOf(false) }
     var recipes by remember { mutableStateOf<List<Recipe>>(emptyList()) }
@@ -105,12 +120,11 @@ fun App() {
         }
     }
 
-    // Диалог добавления рецепта (без изменений)
     if (showDialog) {
         RecipeDialog(
             onDismiss = { showDialog = false }
-        ) { name, ingredients, instructions ->
-            saveToFirebase(name, ingredients, instructions)
+        ) { name, ingredients, instructions, imageUri ->  // Update lambda parameters
+            saveToFirebase(name, ingredients, instructions, imageUri, context)  // Pass context
             loadRecipes { newRecipes ->
                 recipes = newRecipes
             }
@@ -118,7 +132,6 @@ fun App() {
         }
     }
 
-    // Загрузка рецептов при запуске
     LaunchedEffect(Unit) {
         loadRecipes { newRecipes ->
             recipes = newRecipes
@@ -148,27 +161,44 @@ fun RecipeDetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Text(
-                text = "Ингредиенты:",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            Text(
-                text = recipe.ingredients,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-            Text(
-                text = "Инструкция:",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            Text(
-                text = recipe.instructions,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            if (recipe.imageUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(recipe.imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Recipe Image",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Ингредиенты:",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Text(
+                    text = recipe.ingredients,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Text(
+                    text = "Инструкция:",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Text(
+                    text = recipe.instructions,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
         }
     }
 }
@@ -344,6 +374,21 @@ fun RecipeItem(recipe: Recipe) {
 @Composable
 fun RecipeItemContent(recipe: Recipe) {
     Column(modifier = Modifier.padding(16.dp)) {
+        if (recipe.imageUrl.isNotEmpty()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(recipe.imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "Recipe Image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         Text(
             text = recipe.name,
             style = MaterialTheme.typography.headlineSmall,
@@ -374,7 +419,8 @@ fun loadRecipes(onSuccess: (List<Recipe>) -> Unit) {
                     id = document.id,
                     name = document.getString("name") ?: "",
                     ingredients = document.getString("ingredients") ?: "",
-                    instructions = document.getString("instructions") ?: ""
+                    instructions = document.getString("instructions") ?: "",
+                    imageUrl = document.getString("imageUrl") ?: ""  // Add imageUrl
                 )
             }
             onSuccess(recipesList)
@@ -385,12 +431,50 @@ fun loadRecipes(onSuccess: (List<Recipe>) -> Unit) {
         }
 }
 
-fun saveToFirebase(name: String, ingredients: String, instructions: String) {
+fun saveToFirebase(
+    name: String,
+    ingredients: String,
+    instructions: String,
+    imageUri: Uri?,
+    context: Context
+) {
+    if (imageUri != null) {
+        val storageRef = FirebaseStorage.getInstance().reference
+        val imageRef = storageRef.child("recipe_images/${UUID.randomUUID()}")
+
+        val uploadTask = imageRef.putFile(imageUri)
+        uploadTask.continueWithTask { task ->
+            if (!task.isSuccessful) {
+                task.exception?.let { throw it }
+            }
+            imageRef.downloadUrl
+        }.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val downloadUrl = task.result.toString()
+                saveRecipeWithImage(name, ingredients, instructions, downloadUrl)
+            } else {
+                Log.e("Firestore", "Error uploading image", task.exception)
+                saveRecipeWithImage(name, ingredients, instructions, "")
+            }
+        }
+    } else {
+        saveRecipeWithImage(name, ingredients, instructions, "")
+    }
+}
+
+private fun saveRecipeWithImage(
+    name: String,
+    ingredients: String,
+    instructions: String,
+    imageUrl: String
+) {
     val recipe = hashMapOf(
         "name" to name,
         "ingredients" to ingredients,
-        "instructions" to instructions
+        "instructions" to instructions,
+        "imageUrl" to imageUrl
     )
+
     db.collection("recipes").add(recipe)
         .addOnSuccessListener { Log.d("Firestore", "Рецепт добавлен") }
         .addOnFailureListener { e -> Log.e("Firestore", "Ошибка", e) }
@@ -409,11 +493,18 @@ fun deleteRecipe(recipeId: String, onSuccess: () -> Unit) {
         }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecipeDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+fun RecipeDialog(onDismiss: () -> Unit, onSave: (String, String, String, Uri?) -> Unit) {
     var name by remember { mutableStateOf("") }
     var ingredients by remember { mutableStateOf("") }
     var instructions by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        imageUri = uri
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -450,10 +541,29 @@ fun RecipeDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit
                     ),
                     maxLines = 3
                 )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { launcher.launch("image/*") }
+                    ) {
+                        Text("Добавить фото")
+                    }
+                    if (imageUri != null) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Photo selected",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(name, ingredients, instructions) }) {
+            Button(onClick = { onSave(name, ingredients, instructions, imageUri) }) {
                 Text("Сохранить")
             }
         },

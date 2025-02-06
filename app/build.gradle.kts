@@ -54,7 +54,9 @@ dependencies {
     implementation(libs.firebase.auth) // Firebase Auth
     implementation(libs.firebase.firestore)
     implementation(libs.androidx.navigation.runtime.ktx)
-    implementation(libs.androidx.navigation.compose) // Firestore
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.firebase.storage.ktx)
+    implementation(libs.volley)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -62,5 +64,8 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation(libs.coil)
+    implementation(libs.coil.compose)
+    implementation("com.google.firebase:firebase-firestore-ktx:25.0.0")
 
 }
